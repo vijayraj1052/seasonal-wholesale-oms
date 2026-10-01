@@ -1,8 +1,17 @@
-import { useEffect, useState } from 'react';
-import { ShoppingCart, Search } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import {
+  ShoppingCart,
+  Search,
+  ArrowLeft,
+  Save,
+  AlertCircle,
+  CheckCircle2,
+  X,
+} from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import {
@@ -12,6 +21,24 @@ import {
   type OrderStatus,
 } from '@/types/database';
 
+interface OrderItemDetail {
+  id: string;
+  product_id: string;
+  unit_name: string;
+  requested_quantity: number;
+  confirmed_quantity: number | null;
+  unit_price: number;
+  product_subtotal: number;
+  product_name_snapshot: string;
+  brand_name_snapshot: string;
+  variety_snapshot: string | null;
+  product_code: string | null;
+}
+
+interface ConfirmedQtyState {
+  [itemId: string]: string;
+}
+
 export function AdminOrders() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,24 +46,196 @@ export function AdminOrders() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError(null);
-      const { data, error: fetchError } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false });
+  // Detail view state
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [items, setItems] = useState<OrderItemDetail[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
-      if (fetchError) {
-        setError(fetchError.message);
-      } else {
-        setOrders((data ?? []) as Order[]);
-      }
-      setLoading(false);
+  // Review state
+  const [confirmedQtys, setConfirmedQtys] = useState<ConfirmedQtyState>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const { data, error: fetchError } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (fetchError) {
+      setError(fetchError.message);
+    } else {
+      setOrders((data ?? []) as Order[]);
     }
-    load();
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
+
+  const loadOrderDetail = useCallback(async (order: Order) => {
+    setSelectedOrder(order);
+    setDetailLoading(true);
+    setDetailError(null);
+    setSaveError(null);
+    setSaveSuccess(false);
+    setItems([]);
+    setConfirmedQtys({});
+
+    const { data, error: itemsError } = await supabase
+      .from('order_items')
+      .select(
+        `
+        id, product_id, unit_name, requested_quantity, confirmed_quantity,
+        unit_price, product_subtotal, product_name_snapshot,
+        brand_name_snapshot, variety_snapshot,
+        product:products(product_code)
+      `
+      )
+      .eq('order_id', order.id)
+      .order('created_at', { ascending: true });
+
+    if (itemsError) {
+      setDetailError(itemsError.message);
+      setDetailLoading(false);
+      return;
+    }
+
+    const mapped: OrderItemDetail[] = (data ?? []).map((row) => {
+      const r = row as {
+        id: string;
+        product_id: string;
+        unit_name: string;
+        requested_quantity: number;
+        confirmed_quantity: number | null;
+        unit_price: number;
+        product_subtotal: number;
+        product_name_snapshot: string;
+        brand_name_snapshot: string;
+        variety_snapshot: string | null;
+        product: { product_code: string | null }[] | null;
+      };
+      const productCode = Array.isArray(r.product) && r.product.length > 0
+        ? r.product[0].product_code
+        : null;
+      return {
+        id: r.id,
+        product_id: r.product_id,
+        unit_name: r.unit_name,
+        requested_quantity: r.requested_quantity,
+        confirmed_quantity: r.confirmed_quantity,
+        unit_price: Number(r.unit_price),
+        product_subtotal: Number(r.product_subtotal),
+        product_name_snapshot: r.product_name_snapshot,
+        brand_name_snapshot: r.brand_name_snapshot,
+        variety_snapshot: r.variety_snapshot,
+        product_code: productCode,
+      };
+    });
+
+    setItems(mapped);
+
+    // Default confirmed qty to requested qty (or existing confirmed qty if already set)
+    const qtyMap: ConfirmedQtyState = {};
+    mapped.forEach((item) => {
+      qtyMap[item.id] = (
+        item.confirmed_quantity ?? item.requested_quantity
+      ).toString();
+    });
+    setConfirmedQtys(qtyMap);
+    setDetailLoading(false);
+  }, []);
+
+  const closeDetail = () => {
+    setSelectedOrder(null);
+    setItems([]);
+    setConfirmedQtys({});
+    setSaveError(null);
+    setSaveSuccess(false);
+  };
+
+  const isPendingReview = selectedOrder?.status === 'PENDING_REVIEW';
+
+  // Calculate totals
+  const requestedTotal = items.reduce(
+    (sum, item) => sum + item.unit_price * item.requested_quantity,
+    0
+  );
+
+  const reviewedTotal = items.reduce((sum, item) => {
+    const qtyStr = confirmedQtys[item.id];
+    const qty = qtyStr !== undefined ? parseInt(qtyStr, 10) : item.requested_quantity;
+    return sum + item.unit_price * (isNaN(qty) ? 0 : qty);
+  }, 0);
+
+  const handleQtyChange = (itemId: string, value: string) => {
+    setConfirmedQtys((prev) => ({ ...prev, [itemId]: value }));
+    setSaveSuccess(false);
+  };
+
+  const hasQtyChanges = () => {
+    return items.some((item) => {
+      const current = confirmedQtys[item.id];
+      if (current === undefined) return false;
+      const original = (item.confirmed_quantity ?? item.requested_quantity).toString();
+      return current !== original;
+    });
+  };
+
+  const handleSaveReview = async () => {
+    if (!selectedOrder) return;
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    // Validate all quantities
+    for (const item of items) {
+      const qtyStr = confirmedQtys[item.id];
+      if (qtyStr === undefined || qtyStr.trim() === '') {
+        setSaveError('All items must have a confirmed quantity. Enter 0 to remove an item from confirmation.');
+        return;
+      }
+      const qty = parseInt(qtyStr, 10);
+      if (isNaN(qty) || qty < 0) {
+        setSaveError('Confirmed quantities must be non-negative whole numbers.');
+        return;
+      }
+    }
+
+    setSaving(true);
+
+    // Update each item's confirmed_quantity and product_subtotal
+    // We do NOT change order status or inventory
+    const updates = items.map((item) => {
+      const qty = parseInt(confirmedQtys[item.id], 10);
+      const subtotal = Number((item.unit_price * qty).toFixed(2));
+      return supabase
+        .from('order_items')
+        .update({
+          confirmed_quantity: qty,
+          product_subtotal: subtotal,
+        })
+        .eq('id', item.id);
+    });
+
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r.error);
+
+    if (failed && failed.error) {
+      setSaveError(failed.error.message);
+      setSaving(false);
+      return;
+    }
+
+    // Refresh items to reflect saved state
+    await loadOrderDetail(selectedOrder);
+    setSaveSuccess(true);
+    setSaving(false);
+  };
 
   const filtered = orders.filter((order) => {
     const matchesStatus =
@@ -60,6 +259,7 @@ export function AdminOrders() {
     'CANCELLED',
   ];
 
+  // ===== Loading =====
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -68,7 +268,8 @@ export function AdminOrders() {
     );
   }
 
-  if (error) {
+  // ===== Error (list) =====
+  if (error && orders.length === 0) {
     return (
       <EmptyState
         icon={<ShoppingCart className="h-7 w-7" />}
@@ -78,6 +279,294 @@ export function AdminOrders() {
     );
   }
 
+  // ===== Order Detail View =====
+  if (selectedOrder) {
+    return (
+      <div className="space-y-6">
+        {/* Back button + title */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={closeDetail}
+            className="p-2 -ml-2 text-slate-400 hover:text-slate-600"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              {selectedOrder.order_number}
+            </h1>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {new Date(selectedOrder.created_at).toLocaleString(undefined, {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          </div>
+          <Badge
+            className={`ml-auto ${ORDER_STATUS_COLORS[selectedOrder.status as OrderStatus]}`}
+          >
+            {ORDER_STATUS_LABELS[selectedOrder.status as OrderStatus]}
+          </Badge>
+        </div>
+
+        {/* Customer info */}
+        <Card>
+          <CardBody className="space-y-3">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">
+              Customer
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+              <div>
+                <span className="text-slate-400">Name:</span>{' '}
+                <span className="font-medium text-slate-900">
+                  {selectedOrder.customer_name}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400">Phone:</span>{' '}
+                <span className="font-medium text-slate-900">
+                  {selectedOrder.customer_mobile}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400">Shop:</span>{' '}
+                <span className="font-medium text-slate-900">
+                  {selectedOrder.customer_shop}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400">Stall:</span>{' '}
+                <span className="font-medium text-slate-900">
+                  {selectedOrder.customer_stall_number}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400">Location:</span>{' '}
+                <span className="font-medium text-slate-900">
+                  {selectedOrder.customer_stall_location}
+                </span>
+              </div>
+              {selectedOrder.customer_licence && (
+                <div>
+                  <span className="text-slate-400">Licence:</span>{' '}
+                  <span className="font-medium text-slate-900">
+                    {selectedOrder.customer_licence}
+                  </span>
+                </div>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Detail loading */}
+        {detailLoading && (
+          <div className="flex items-center justify-center py-10">
+            <Spinner size="lg" />
+          </div>
+        )}
+
+        {/* Detail error */}
+        {detailError && (
+          <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {detailError}
+          </div>
+        )}
+
+        {/* Order items */}
+        {!detailLoading && !detailError && (
+          <>
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                        Product
+                      </th>
+                      <th className="px-4 py-3 text-left font-semibold text-slate-700 hidden md:table-cell">
+                        Brand
+                      </th>
+                      <th className="px-4 py-3 text-center font-semibold text-slate-700">
+                        Unit
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Unit Price
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Requested Qty
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Confirmed Qty
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        Line Total
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {items.map((item) => {
+                      const qtyStr = confirmedQtys[item.id];
+                      const confirmedQty =
+                        qtyStr !== undefined
+                          ? parseInt(qtyStr, 10)
+                          : item.requested_quantity;
+                      const lineTotal = item.unit_price * (isNaN(confirmedQty) ? 0 : confirmedQty);
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            <span className="font-medium text-slate-900">
+                              {item.product_name_snapshot}
+                            </span>
+                            {item.variety_snapshot && (
+                              <span className="block text-xs text-slate-500">
+                                {item.variety_snapshot}
+                              </span>
+                            )}
+                            {item.product_code && (
+                              <span className="block text-xs text-slate-400">
+                                #{item.product_code}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600 hidden md:table-cell">
+                            {item.brand_name_snapshot || '—'}
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-600">
+                            {item.unit_name}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700">
+                            ${item.unit_price.toFixed(2)}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-slate-900">
+                            {item.requested_quantity}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {isPendingReview ? (
+                              <input
+                                type="number"
+                                min="0"
+                                value={qtyStr ?? ''}
+                                onChange={(e) =>
+                                  handleQtyChange(item.id, e.target.value)
+                                }
+                                className="w-20 rounded border border-slate-300 px-2 py-1 text-sm text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            ) : (
+                              <span className="font-medium text-slate-900">
+                                {item.confirmed_quantity ?? '—'}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-slate-900">
+                            ${lineTotal.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            {/* Totals */}
+            <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-end">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-500">Requested Total:</span>
+                <span className="font-semibold text-slate-700">
+                  ${requestedTotal.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-base border-l border-slate-200 sm:pl-6 pl-0">
+                <span className="text-slate-600 font-medium">
+                  Reviewed Total:
+                </span>
+                <span
+                  className={`font-bold ${
+                    reviewedTotal !== requestedTotal
+                      ? 'text-blue-700'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  ${reviewedTotal.toFixed(2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Review save bar (only for PENDING_REVIEW) */}
+            {isPendingReview && (
+              <Card>
+                <CardBody className="space-y-4">
+                  <div className="flex items-start gap-2 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Reviewing order request</p>
+                      <p className="text-xs mt-0.5">
+                        Adjust confirmed quantities as needed. The unit price
+                        shown is the price captured at submission (after any
+                        applicable discount). Saving only records confirmed
+                        quantities — it does not change the order status or
+                        affect inventory.
+                      </p>
+                    </div>
+                  </div>
+
+                  {saveError && (
+                    <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      {saveError}
+                    </div>
+                  )}
+
+                  {saveSuccess && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      Confirmed quantities have been saved. The order remains
+                      Pending Review.
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={handleSaveReview}
+                      loading={saving}
+                      disabled={!hasQtyChanges() && !saveSuccess}
+                    >
+                      <Save className="h-4 w-4" />
+                      Save Reviewed Quantities
+                    </Button>
+                    <Button variant="outline" onClick={closeDetail}>
+                      <X className="h-4 w-4" />
+                      Close
+                    </Button>
+                    {hasQtyChanges() && !saveSuccess && (
+                      <span className="text-xs text-amber-600 ml-auto">
+                        Unsaved changes
+                      </span>
+                    )}
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* Non-pending info note */}
+            {!isPendingReview && (
+              <div className="flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-500">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                This order is no longer in review. Confirmed quantities are
+                shown for reference and cannot be edited here.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  // ===== Order List View =====
   return (
     <div className="space-y-6">
       <div>
@@ -111,6 +600,13 @@ export function AdminOrders() {
           ))}
         </select>
       </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          {error}
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -147,8 +643,12 @@ export function AdminOrders() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((order) => (
-                  <tr key={order.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">
+                  <tr
+                    key={order.id}
+                    onClick={() => loadOrderDetail(order)}
+                    className="hover:bg-blue-50 cursor-pointer transition-colors"
+                  >
+                    <td className="px-4 py-3 font-medium text-blue-700">
                       {order.order_number}
                     </td>
                     <td className="px-4 py-3 text-slate-700">
@@ -165,7 +665,9 @@ export function AdminOrders() {
                     </td>
                     <td className="px-4 py-3 text-center">
                       <Badge
-                        className={ORDER_STATUS_COLORS[order.status as OrderStatus]}
+                        className={
+                          ORDER_STATUS_COLORS[order.status as OrderStatus]
+                        }
                       >
                         {ORDER_STATUS_LABELS[order.status as OrderStatus]}
                       </Badge>
@@ -177,11 +679,6 @@ export function AdminOrders() {
           </div>
         </Card>
       )}
-
-      <p className="text-xs text-slate-400 text-center">
-        Order detail views with quantity modification, confirmation, and status
-        changes will be available in Phase 2.
-      </p>
     </div>
   );
 }
