@@ -16,6 +16,7 @@ import { CustomerRegister } from '@/pages/auth/CustomerRegister';
 import { AdminLogin } from '@/pages/auth/AdminLogin';
 import { CustomerHome } from '@/pages/customer/CustomerHome';
 import { CustomerCatalogue } from '@/pages/customer/CustomerCatalogue';
+import { CustomerCheckout } from '@/pages/customer/CustomerCheckout';
 import { CustomerOrders } from '@/pages/customer/CustomerOrders';
 import { CustomerNotifications } from '@/pages/customer/CustomerNotifications';
 import { CustomerProfile } from '@/pages/customer/CustomerProfile';
@@ -101,6 +102,7 @@ export default function App() {
         >
           <Route index element={<CustomerHome />} />
           <Route path="catalogue" element={<CustomerCatalogue />} />
+          <Route path="checkout" element={<CustomerCheckout />} />
           <Route path="orders" element={<CustomerOrders />} />
           <Route path="notifications" element={<CustomerNotifications />} />
           <Route path="profile" element={<CustomerProfile />} />

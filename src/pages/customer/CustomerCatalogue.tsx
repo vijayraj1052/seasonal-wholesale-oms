@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Package, Search, ShoppingCart, Plus, Minus, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -27,6 +28,7 @@ interface CatalogueRow {
 
 export function CustomerCatalogue() {
   const { addItem, totalItems } = useCart();
+  const navigate = useNavigate();
   const [rows, setRows] = useState<CatalogueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -229,7 +231,15 @@ export function CustomerCatalogue() {
           </p>
         </div>
         <div className="relative shrink-0">
-          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
+          <button
+            onClick={() => totalItems > 0 && navigate('/app/checkout')}
+            disabled={totalItems === 0}
+            className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm transition-colors ${
+              totalItems > 0
+                ? 'hover:border-blue-400 hover:bg-blue-50 cursor-pointer'
+                : 'cursor-default'
+            }`}
+          >
             <ShoppingCart className="h-5 w-5 text-slate-600" />
             <span className="text-sm font-semibold text-slate-900">
               {totalItems}
@@ -237,7 +247,12 @@ export function CustomerCatalogue() {
             <span className="text-xs text-slate-500 hidden sm:inline">
               in cart
             </span>
-          </div>
+            {totalItems > 0 && (
+              <span className="text-xs font-medium text-blue-600 hidden sm:inline">
+                · Checkout
+              </span>
+            )}
+          </button>
         </div>
       </div>
 
