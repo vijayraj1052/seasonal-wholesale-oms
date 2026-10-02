@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useCart } from '@/context/CartContext';
+import { formatINR } from '@/lib/format';
 import type {
   Product,
   Brand,
@@ -416,7 +417,7 @@ export function CustomerCatalogue() {
                         <div>
                           <p className="text-slate-400">Base price</p>
                           <p className="font-semibold text-slate-700">
-                            ${unit.base_price.toFixed(2)}
+                            {formatINR(unit.base_price)}
                           </p>
                         </div>
                         <div>
@@ -430,7 +431,7 @@ export function CustomerCatalogue() {
                         <div>
                           <p className="text-slate-400">Effective price</p>
                           <p className="font-semibold text-blue-700">
-                            ${effPrice.toFixed(2)}
+                            {formatINR(effPrice)}
                           </p>
                         </div>
                       </div>
@@ -500,7 +501,7 @@ export function CustomerCatalogue() {
                         </Button>
 
                         <span className="text-sm font-semibold text-slate-900 ml-auto">
-                          Subtotal: ${lineTotal.toFixed(2)}
+                          Subtotal: {formatINR(lineTotal)}
                         </span>
                       </div>
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Tag, Plus, Pencil, Check, X, AlertCircle } from 'lucide-react';
+import { Tag, Plus, Pencil, Check, X, AlertCircle, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -25,6 +25,8 @@ export function AdminBrands() {
   const [form, setForm] = useState<BrandFormState>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -119,6 +121,43 @@ export function AdminBrands() {
     await load();
   };
 
+  const handleDelete = async (brand: Brand) => {
+    setDeleteError(null);
+    const proceed = confirm(
+      `Delete brand "${brand.name}"? This permanently removes the brand.`
+    );
+    if (!proceed) return;
+
+    setDeletingId(brand.id);
+
+    const { count: productCount } = await supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .eq('brand_id', brand.id);
+
+    if ((productCount ?? 0) > 0) {
+      setDeleteError(
+        `"${brand.name}" cannot be deleted because it is linked to ${productCount} product(s). Deactivate it instead to hide it from the product form while preserving existing products.`
+      );
+      setDeletingId(null);
+      return;
+    }
+
+    const { error: deleteErr } = await supabase
+      .from('brands')
+      .delete()
+      .eq('id', brand.id);
+
+    if (deleteErr) {
+      setDeleteError(deleteErr.message);
+      setDeletingId(null);
+      return;
+    }
+
+    setDeletingId(null);
+    await load();
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -208,6 +247,19 @@ export function AdminBrands() {
         </div>
       )}
 
+      {deleteError && (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{deleteError}</span>
+          <button
+            onClick={() => setDeleteError(null)}
+            className="ml-auto shrink-0 text-red-400 hover:text-red-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {brands.length === 0 && !showForm ? (
         <EmptyState
           icon={<Tag className="h-7 w-7" />}
@@ -282,6 +334,14 @@ export function AdminBrands() {
                           onClick={() => toggleActive(brand)}
                         >
                           {brand.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          loading={deletingId === brand.id}
+                          onClick={() => handleDelete(brand)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
                         </Button>
                       </div>
                     </td>

@@ -29,6 +29,7 @@ import type {
   UnitType,
 } from '@/types/database';
 import { UNIT_TYPE_LABELS } from '@/types/database';
+import { formatINR } from '@/lib/format';
 
 interface ProductRow {
   product: Product;
@@ -119,6 +120,82 @@ export function AdminProducts() {
 
   // Expanded rows
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  // Delete state
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteProduct = async (row: ProductRow) => {
+    setDeleteError(null);
+    const productId = row.product.id;
+
+    const proceed = confirm(
+      `Delete "${row.product.name}"? This permanently removes the product, its selling units, and inventory record. This cannot be undone.`
+    );
+    if (!proceed) return;
+
+    setDeletingId(productId);
+
+    // Check for dependent records: order_items, inventory_transactions
+    const [
+      { count: orderItemCount },
+      { count: txnCount },
+    ] = await Promise.all([
+      supabase
+        .from('order_items')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', productId),
+      supabase
+        .from('inventory_transactions')
+        .select('id', { count: 'exact', head: true })
+        .eq('product_id', productId),
+    ]);
+
+    if ((orderItemCount ?? 0) > 0 || (txnCount ?? 0) > 0) {
+      setDeleteError(
+        `"${row.product.name}" cannot be permanently deleted because it is referenced by existing orders or inventory transactions. Deactivate it instead to hide it from the catalogue while preserving order history.`
+      );
+      setDeletingId(null);
+      return;
+    }
+
+    // Safe to delete: remove inventory, product_units, then the product
+    const { error: invError } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('product_id', productId);
+
+    if (invError) {
+      setDeleteError(invError.message);
+      setDeletingId(null);
+      return;
+    }
+
+    const { error: unitsError } = await supabase
+      .from('product_units')
+      .delete()
+      .eq('product_id', productId);
+
+    if (unitsError) {
+      setDeleteError(unitsError.message);
+      setDeletingId(null);
+      return;
+    }
+
+    const { error: productError } = await supabase
+      .from('products')
+      .delete()
+      .eq('id', productId);
+
+    if (productError) {
+      setDeleteError(productError.message);
+      setDeletingId(null);
+      return;
+    }
+
+    setDeletingId(null);
+    await loadAll();
+  };
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -861,10 +938,10 @@ export function AdminProducts() {
                             )}
                           </div>
                           <p className="text-xs text-slate-500 mt-0.5">
-                            {unit.quantity_per_unit} pcs/unit · ${unit.base_price}{' '}
+                            {unit.quantity_per_unit} pcs/unit · {formatINR(parseFloat(unit.base_price) || 0)}{' '}
                             {unit.discount_percent !== '0' &&
                               `· ${unit.discount_percent}% off`}
-                            · Effective: ${effectivePrice(unit).toFixed(2)}
+                            · Effective: {formatINR(effectivePrice(unit))}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -1191,6 +1268,19 @@ export function AdminProducts() {
             </div>
           )}
 
+          {deleteError && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>{deleteError}</span>
+              <button
+                onClick={() => setDeleteError(null)}
+                className="ml-auto shrink-0 text-red-400 hover:text-red-600"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {filtered.length === 0 ? (
             <EmptyState
               icon={<Package className="h-7 w-7" />}
@@ -1311,6 +1401,14 @@ export function AdminProducts() {
                           >
                             {row.product.is_active ? 'Deactivate' : 'Activate'}
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            loading={deletingId === row.product.id}
+                            onClick={() => handleDeleteProduct(row)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </Button>
                         </div>
                       </div>
 
@@ -1335,15 +1433,15 @@ export function AdminProducts() {
                                       {u.quantity_per_unit} pcs
                                     </span>
                                     <span className="text-slate-600">
-                                      ${u.base_price.toFixed(2)}
+                                      {formatINR(u.base_price)}
                                     </span>
                                     {u.discount_percent > 0 && (
                                       <span className="text-blue-600">
-                                        {u.discount_percent}% off → $
-                                        {(
+                                        {u.discount_percent}% off →{' '}
+                                        {formatINR(
                                           u.base_price *
                                           (1 - u.discount_percent / 100)
-                                        ).toFixed(2)}
+                                        )}
                                       </span>
                                     )}
                                     {!u.is_active && (

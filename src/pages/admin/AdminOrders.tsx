@@ -10,6 +10,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
+import { formatINR } from '@/lib/format';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -494,7 +495,7 @@ export function AdminOrders() {
                             {item.unit_name}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-700">
-                            ${item.unit_price.toFixed(2)}
+                            {formatINR(item.unit_price)}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
                             {item.requested_quantity}
@@ -517,7 +518,7 @@ export function AdminOrders() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
-                            ${lineTotal.toFixed(2)}
+                            {formatINR(lineTotal)}
                           </td>
                         </tr>
                       );
@@ -532,7 +533,7 @@ export function AdminOrders() {
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-slate-500">Requested Total:</span>
                 <span className="font-semibold text-slate-700">
-                  ${requestedTotal.toFixed(2)}
+                  {formatINR(requestedTotal)}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-base border-l border-slate-200 sm:pl-6 pl-0">
@@ -546,7 +547,7 @@ export function AdminOrders() {
                       : 'text-slate-900'
                   }`}
                 >
-                  ${reviewedTotal.toFixed(2)}
+                  {formatINR(reviewedTotal)}
                 </span>
               </div>
             </div>

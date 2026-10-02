@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { FolderTree, Plus, Pencil, Check, X, AlertCircle } from 'lucide-react';
+import { FolderTree, Plus, Pencil, Check, X, AlertCircle, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -30,6 +30,8 @@ export function AdminCategories() {
   const [form, setForm] = useState<CategoryFormState>(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,6 +133,43 @@ export function AdminCategories() {
       setError(toggleError.message);
       return;
     }
+    await load();
+  };
+
+  const handleDelete = async (cat: Category) => {
+    setDeleteError(null);
+    const proceed = confirm(
+      `Delete category "${cat.name}"? This permanently removes the category.`
+    );
+    if (!proceed) return;
+
+    setDeletingId(cat.id);
+
+    const { count: productCount } = await supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .eq('category_id', cat.id);
+
+    if ((productCount ?? 0) > 0) {
+      setDeleteError(
+        `"${cat.name}" cannot be deleted because it is linked to ${productCount} product(s). Deactivate it instead to hide it from the product form while preserving existing products.`
+      );
+      setDeletingId(null);
+      return;
+    }
+
+    const { error: deleteErr } = await supabase
+      .from('categories')
+      .delete()
+      .eq('id', cat.id);
+
+    if (deleteErr) {
+      setDeleteError(deleteErr.message);
+      setDeletingId(null);
+      return;
+    }
+
+    setDeletingId(null);
     await load();
   };
 
@@ -241,6 +280,19 @@ export function AdminCategories() {
         </div>
       )}
 
+      {deleteError && (
+        <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+          <span>{deleteError}</span>
+          <button
+            onClick={() => setDeleteError(null)}
+            className="ml-auto shrink-0 text-red-400 hover:text-red-600"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {categories.length === 0 && !showForm ? (
         <EmptyState
           icon={<FolderTree className="h-7 w-7" />}
@@ -315,6 +367,14 @@ export function AdminCategories() {
                           onClick={() => toggleActive(cat)}
                         >
                           {cat.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          loading={deletingId === cat.id}
+                          onClick={() => handleDelete(cat)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
                         </Button>
                       </div>
                     </td>

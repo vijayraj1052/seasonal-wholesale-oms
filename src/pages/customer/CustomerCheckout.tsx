@@ -17,6 +17,7 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import type { CartItem } from '@/types/database';
+import { formatINR } from '@/lib/format';
 
 interface SubmitItemPayload {
   unit_id: string;
@@ -248,7 +249,7 @@ export function CustomerCheckout() {
                   </p>
                   <div className="flex items-center gap-4 mt-2 text-xs">
                     <span className="text-slate-400">
-                      Base: ${item.base_price.toFixed(2)}
+                      Base: {formatINR(item.base_price)}
                     </span>
                     {item.discount_percent > 0 && (
                       <span className="text-blue-600">
@@ -256,7 +257,7 @@ export function CustomerCheckout() {
                       </span>
                     )}
                     <span className="font-medium text-slate-700">
-                      Effective: ${effPrice.toFixed(2)}
+                      Effective: {formatINR(effPrice)}
                     </span>
                   </div>
                 </div>
@@ -284,7 +285,7 @@ export function CustomerCheckout() {
                     </button>
                   </div>
                   <span className="text-sm font-semibold text-slate-900">
-                    ${total.toFixed(2)}
+                    {formatINR(total)}
                   </span>
                   <button
                     onClick={() =>
@@ -312,7 +313,7 @@ export function CustomerCheckout() {
           <div className="flex items-center justify-between text-base border-t border-slate-100 pt-3">
             <span className="font-semibold text-slate-900">Order Total</span>
             <span className="font-bold text-slate-900">
-              ${orderTotal.toFixed(2)}
+              {formatINR(orderTotal)}
             </span>
           </div>
 
