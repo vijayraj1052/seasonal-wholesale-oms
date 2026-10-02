@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   ShoppingCart,
   Search,
@@ -7,6 +7,7 @@ import {
   AlertCircle,
   CheckCircle2,
   X,
+  Lock,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -58,6 +59,11 @@ export function AdminOrders() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Confirm state
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmSuccess, setConfirmSuccess] = useState(false);
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -84,6 +90,8 @@ export function AdminOrders() {
     setDetailError(null);
     setSaveError(null);
     setSaveSuccess(false);
+    setConfirmError(null);
+    setConfirmSuccess(false);
     setItems([]);
     setConfirmedQtys({});
 
@@ -157,6 +165,8 @@ export function AdminOrders() {
     setConfirmedQtys({});
     setSaveError(null);
     setSaveSuccess(false);
+    setConfirmError(null);
+    setConfirmSuccess(false);
   };
 
   const isPendingReview = selectedOrder?.status === 'PENDING_REVIEW';
@@ -185,6 +195,45 @@ export function AdminOrders() {
       const original = (item.confirmed_quantity ?? item.requested_quantity).toString();
       return current !== original;
     });
+  };
+
+  const handleConfirmOrder = async () => {
+    if (!selectedOrder) return;
+    setConfirmError(null);
+    setConfirmSuccess(false);
+    setConfirming(true);
+
+    const { data, error: rpcError } = await supabase.rpc('confirm_order', {
+      p_order_id: selectedOrder.id,
+    });
+
+    if (rpcError) {
+      setConfirmError(rpcError.message);
+      setConfirming(false);
+      return;
+    }
+
+    if (!data || !data.order_number) {
+      setConfirmError('Confirmation failed. Please try again.');
+      setConfirming(false);
+      return;
+    }
+
+    // Refresh the order list and reload the detail with updated status
+    await loadOrders();
+
+    // Find the updated order from the refreshed list
+    const updated = ordersRef.current.find(
+      (o) => o.id === selectedOrder.id
+    );
+    if (updated) {
+      await loadOrderDetail({ ...updated, status: 'CONFIRMED', confirmed_at: new Date().toISOString() });
+    } else {
+      await loadOrderDetail({ ...selectedOrder, status: 'CONFIRMED', confirmed_at: new Date().toISOString() });
+    }
+
+    setConfirmSuccess(true);
+    setConfirming(false);
   };
 
   const handleSaveReview = async () => {
@@ -234,8 +283,14 @@ export function AdminOrders() {
     // Refresh items to reflect saved state
     await loadOrderDetail(selectedOrder);
     setSaveSuccess(true);
+    setConfirmError(null);
+    setConfirmSuccess(false);
     setSaving(false);
   };
+
+  // Keep a ref to the latest orders for use in async callbacks
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
 
   const filtered = orders.filter((order) => {
     const matchesStatus =
@@ -521,7 +576,7 @@ export function AdminOrders() {
                     </div>
                   )}
 
-                  {saveSuccess && (
+                  {saveSuccess && !confirmSuccess && (
                     <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
                       <CheckCircle2 className="h-4 w-4 shrink-0" />
                       Confirmed quantities have been saved. The order remains
@@ -529,7 +584,57 @@ export function AdminOrders() {
                     </div>
                   )}
 
-                  <div className="flex items-center gap-3">
+                  {/* Confirm order section */}
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                      <Lock className="h-4 w-4 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Confirm Order &amp; Allocate Stock</p>
+                        <p className="text-xs mt-0.5">
+                          Confirming transitions this order to{" "}
+                          <span className="font-semibold">Confirmed</span> and
+                          permanently allocates inventory using the saved
+                          confirmed quantities. This action cannot be undone
+                          from this screen. Ensure all quantities are correct
+                          before confirming.
+                        </p>
+                      </div>
+                    </div>
+
+                    {confirmError && (
+                      <div className="flex items-start gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>{confirmError}</span>
+                      </div>
+                    )}
+
+                    {confirmSuccess && (
+                      <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                        <CheckCircle2 className="h-4 w-4 shrink-0" />
+                        Order has been confirmed. Stock has been allocated and
+                        the order is now Confirmed.
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-3">
+                      <Button
+                        variant="secondary"
+                        onClick={handleConfirmOrder}
+                        loading={confirming}
+                        disabled={hasQtyChanges() || confirming || confirmSuccess}
+                      >
+                        <Lock className="h-4 w-4" />
+                        Confirm Order
+                      </Button>
+                      {hasQtyChanges() && (
+                        <span className="text-xs text-amber-600">
+                          Save your quantity changes before confirming.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 border-t border-slate-100 pt-4">
                     <Button
                       onClick={handleSaveReview}
                       loading={saving}
