@@ -181,6 +181,8 @@ export interface OrderItem {
   product_name_snapshot: string;
   brand_name_snapshot: string;
   variety_snapshot: string | null;
+  base_price: number | null;
+  product_discount_percent: number | null;
   created_at: string;
 }
 

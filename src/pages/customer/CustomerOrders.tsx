@@ -52,7 +52,7 @@ export function CustomerOrders() {
     const { data, error: itemsError } = await supabase
       .from('order_items')
       .select(
-        'id, order_id, product_id, unit_name, requested_quantity, confirmed_quantity, unit_price, product_subtotal, product_name_snapshot, brand_name_snapshot, variety_snapshot, created_at'
+        'id, order_id, product_id, unit_name, requested_quantity, confirmed_quantity, unit_price, product_subtotal, product_name_snapshot, brand_name_snapshot, variety_snapshot, base_price, product_discount_percent, created_at'
       )
       .eq('order_id', order.id)
       .order('created_at', { ascending: true });
@@ -94,10 +94,35 @@ export function CustomerOrders() {
 
   // ===== Order Detail View =====
   if (selectedOrder) {
-    const orderTotal = items.reduce(
-      (sum, item) => sum + Number(item.product_subtotal),
+    const itemBasePrice = (item: OrderItem) =>
+      item.base_price != null ? Number(item.base_price) : Number(item.unit_price);
+    const itemDiscPct = (item: OrderItem) =>
+      item.product_discount_percent != null
+        ? Number(item.product_discount_percent)
+        : 0;
+    const itemEffPrice = (item: OrderItem) => Number(item.unit_price);
+    const itemDisplayQty = (item: OrderItem) =>
+      item.confirmed_quantity ?? item.requested_quantity;
+    const itemGrossTotal = (item: OrderItem) =>
+      itemBasePrice(item) * itemDisplayQty(item);
+    const itemDiscAmount = (item: OrderItem) =>
+      itemGrossTotal(item) - itemEffPrice(item) * itemDisplayQty(item);
+    const itemNetTotal = (item: OrderItem) =>
+      itemEffPrice(item) * itemDisplayQty(item);
+
+    const grossTotal = items.reduce((s, i) => s + itemGrossTotal(i), 0);
+    const totalProductDisc = items.reduce(
+      (s, i) => s + itemDiscAmount(i),
       0
     );
+    const subtotalAfterProductDisc = items.reduce(
+      (s, i) => s + itemNetTotal(i),
+      0
+    );
+    const orderDiscPct = selectedOrder.discount_percent ?? 0;
+    const orderDiscAmount =
+      subtotalAfterProductDisc * (orderDiscPct / 100);
+    const netPayable = subtotalAfterProductDisc - orderDiscAmount;
     const isPaid = selectedOrder.status === 'PAID';
 
     return (
@@ -221,20 +246,30 @@ export function CustomerOrders() {
                         Unit
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        MRP / Base
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700 hidden lg:table-cell">
+                        Disc %
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Unit Price
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Qty
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Line Total
+                        Net Total
                       </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {items.map((item) => {
-                      const displayQty =
-                        item.confirmed_quantity ?? item.requested_quantity;
+                      const bPrice = itemBasePrice(item);
+      const discPct = itemDiscPct(item);
+      const discAmt = itemDiscAmount(item);
+      const effPrice = itemEffPrice(item);
+      const displayQty = itemDisplayQty(item);
+      const netTotal = itemNetTotal(item);
                       return (
                         <tr key={item.id} className="hover:bg-slate-50">
                           <td className="px-4 py-3">
@@ -254,13 +289,24 @@ export function CustomerOrders() {
                             {item.unit_name}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-700">
-                            {formatINR(Number(item.unit_price))}
+                            {formatINR(bPrice)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-500 hidden lg:table-cell">
+                            {discPct > 0 ? `${discPct}%` : '—'}
+                            {discAmt > 0 && (
+                              <span className="block text-xs text-slate-400">
+                                −{formatINR(discAmt)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700">
+                            {formatINR(effPrice)}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
                             {displayQty}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
-                            {formatINR(Number(item.product_subtotal))}
+                            {formatINR(netTotal)}
                           </td>
                         </tr>
                       );
@@ -270,12 +316,35 @@ export function CustomerOrders() {
               </div>
             </Card>
 
-            <div className="flex items-center justify-end gap-2 text-base">
-              <span className="text-slate-600 font-medium">Order Total:</span>
-              <span className="font-bold text-slate-900">
-                {formatINR(orderTotal)}
-              </span>
-            </div>
+            {/* Bill breakdown */}
+            <Card>
+              <CardBody className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Gross Total (before product discounts)</span>
+                  <span className="font-medium text-slate-700">{formatINR(grossTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Total Product-Level Discount</span>
+                  <span className="font-medium text-slate-600">−{formatINR(totalProductDisc)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm border-t border-slate-100 pt-2">
+                  <span className="text-slate-600 font-medium">Subtotal (after product discounts)</span>
+                  <span className="font-semibold text-slate-800">{formatINR(subtotalAfterProductDisc)}</span>
+                </div>
+                {orderDiscPct > 0 && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-500">
+                      Order Discount ({orderDiscPct}%)
+                    </span>
+                    <span className="font-medium text-slate-600">−{formatINR(orderDiscAmount)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between text-base border-t border-slate-200 pt-2">
+                  <span className="font-bold text-slate-900">Net Payable</span>
+                  <span className="font-bold text-blue-700">{formatINR(netPayable)}</span>
+                </div>
+              </CardBody>
+            </Card>
 
             {selectedOrder.payment_due_date && !isPaid && (
               <p className="text-sm text-amber-600 text-right">

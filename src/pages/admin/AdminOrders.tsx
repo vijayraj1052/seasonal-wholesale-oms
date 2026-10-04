@@ -36,6 +36,8 @@ interface OrderItemDetail {
   brand_name_snapshot: string;
   variety_snapshot: string | null;
   product_code: string | null;
+  base_price: number | null;
+  product_discount_percent: number | null;
 }
 
 interface ConfirmedQtyState {
@@ -71,6 +73,10 @@ export function AdminOrders() {
   const [paidError, setPaidError] = useState<string | null>(null);
   const [paidSuccess, setPaidSuccess] = useState(false);
 
+  // Order-level discount state
+  const [orderDiscountStr, setOrderDiscountStr] = useState('0');
+  const [orderDiscountSaved, setOrderDiscountSaved] = useState(false);
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -103,6 +109,10 @@ export function AdminOrders() {
     setPaidSuccess(false);
     setItems([]);
     setConfirmedQtys({});
+    setOrderDiscountStr(
+      order.discount_percent != null ? order.discount_percent.toString() : '0'
+    );
+    setOrderDiscountSaved(false);
 
     const { data, error: itemsError } = await supabase
       .from('order_items')
@@ -111,6 +121,7 @@ export function AdminOrders() {
         id, product_id, unit_name, requested_quantity, confirmed_quantity,
         unit_price, product_subtotal, product_name_snapshot,
         brand_name_snapshot, variety_snapshot,
+        base_price, product_discount_percent,
         product:products(product_code)
       `
       )
@@ -135,6 +146,8 @@ export function AdminOrders() {
         product_name_snapshot: string;
         brand_name_snapshot: string;
         variety_snapshot: string | null;
+        base_price: number | null;
+        product_discount_percent: number | null;
         product: { product_code: string | null }[] | null;
       };
       const productCode = Array.isArray(r.product) && r.product.length > 0
@@ -152,6 +165,9 @@ export function AdminOrders() {
         brand_name_snapshot: r.brand_name_snapshot,
         variety_snapshot: r.variety_snapshot,
         product_code: productCode,
+        base_price: r.base_price != null ? Number(r.base_price) : null,
+        product_discount_percent:
+          r.product_discount_percent != null ? Number(r.product_discount_percent) : null,
       };
     });
 
@@ -178,6 +194,8 @@ export function AdminOrders() {
     setConfirmSuccess(false);
     setPaidError(null);
     setPaidSuccess(false);
+    setOrderDiscountStr('0');
+    setOrderDiscountSaved(false);
   };
 
   const isPendingReview = selectedOrder?.status === 'PENDING_REVIEW';
@@ -220,17 +238,51 @@ export function AdminOrders() {
     setMarkingPaid(false);
   };
 
-  // Calculate totals
+  // ===== Billing calculations =====
+  const getDisplayQty = (item: OrderItemDetail) => {
+    const qtyStr = confirmedQtys[item.id];
+    return qtyStr !== undefined ? parseInt(qtyStr, 10) : item.requested_quantity;
+  };
+
+  const lineBasePrice = (item: OrderItemDetail) =>
+    item.base_price ?? item.unit_price;
+  const lineDiscPercent = (item: OrderItemDetail) =>
+    item.product_discount_percent ?? 0;
+  const lineEffPrice = (item: OrderItemDetail) => item.unit_price;
+  const lineGrossTotal = (item: OrderItemDetail) =>
+    lineBasePrice(item) * getDisplayQty(item);
+  const lineDiscAmount = (item: OrderItemDetail) =>
+    lineGrossTotal(item) - lineEffPrice(item) * getDisplayQty(item);
+  const lineNetTotal = (item: OrderItemDetail) =>
+    lineEffPrice(item) * getDisplayQty(item);
+
+  const grossTotal = items.reduce((s, i) => s + lineGrossTotal(i), 0);
+  const totalProductDisc = items.reduce((s, i) => s + lineDiscAmount(i), 0);
+  const subtotalAfterProductDisc = items.reduce(
+    (s, i) => s + lineNetTotal(i),
+    0
+  );
+
+  const orderDiscountPercent = (() => {
+    const v = parseFloat(orderDiscountStr);
+    return isNaN(v) ? 0 : Math.max(0, Math.min(100, v));
+  })();
+  const orderDiscountAmount =
+    subtotalAfterProductDisc * (orderDiscountPercent / 100);
+  const netPayable = subtotalAfterProductDisc - orderDiscountAmount;
+
+  // Legacy totals (kept for backward compat in any logic that references them)
   const requestedTotal = items.reduce(
     (sum, item) => sum + item.unit_price * item.requested_quantity,
     0
   );
+  const reviewedTotal = subtotalAfterProductDisc;
 
-  const reviewedTotal = items.reduce((sum, item) => {
-    const qtyStr = confirmedQtys[item.id];
-    const qty = qtyStr !== undefined ? parseInt(qtyStr, 10) : item.requested_quantity;
-    return sum + item.unit_price * (isNaN(qty) ? 0 : qty);
-  }, 0);
+  const handleOrderDiscountChange = (value: string) => {
+    setOrderDiscountStr(value);
+    setOrderDiscountSaved(false);
+    setSaveSuccess(false);
+  };
 
   const handleQtyChange = (itemId: string, value: string) => {
     setConfirmedQtys((prev) => ({ ...prev, [itemId]: value }));
@@ -245,6 +297,15 @@ export function AdminOrders() {
       return current !== original;
     });
   };
+
+  const hasDiscountChange = () => {
+    const saved = selectedOrder?.discount_percent ?? 0;
+    const current = parseFloat(orderDiscountStr);
+    return isNaN(current) ? saved !== 0 : current !== saved;
+  };
+
+  const hasUnsavedChanges = () =>
+    hasQtyChanges() || (isPendingReview && hasDiscountChange());
 
   const handleConfirmOrder = async () => {
     if (!selectedOrder) return;
@@ -329,8 +390,26 @@ export function AdminOrders() {
       return;
     }
 
+    // Save order-level discount
+    const discVal = parseFloat(orderDiscountStr);
+    const discToSave = isNaN(discVal) ? 0 : Math.max(0, Math.min(100, discVal));
+    const { error: orderDiscError } = await supabase
+      .from('orders')
+      .update({ discount_percent: discToSave })
+      .eq('id', selectedOrder.id);
+
+    if (orderDiscError) {
+      setSaveError(orderDiscError.message);
+      setSaving(false);
+      return;
+    }
+
     // Refresh items to reflect saved state
-    await loadOrderDetail(selectedOrder);
+    await loadOrderDetail({
+      ...selectedOrder,
+      discount_percent: discToSave,
+    });
+    setOrderDiscountSaved(true);
     setSaveSuccess(true);
     setConfirmError(null);
     setConfirmSuccess(false);
@@ -498,16 +577,22 @@ export function AdminOrders() {
                         Unit
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                        MRP / Base
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700 hidden lg:table-cell">
+                        Disc %
+                      </th>
+                      <th className="px-4 py-3 text-right font-semibold text-slate-700">
                         Unit Price
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Requested Qty
+                        Req Qty
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Confirmed Qty
+                        Conf Qty
                       </th>
                       <th className="px-4 py-3 text-right font-semibold text-slate-700">
-                        Line Total
+                        Net Total
                       </th>
                     </tr>
                   </thead>
@@ -518,7 +603,10 @@ export function AdminOrders() {
                         qtyStr !== undefined
                           ? parseInt(qtyStr, 10)
                           : item.requested_quantity;
-                      const lineTotal = item.unit_price * (isNaN(confirmedQty) ? 0 : confirmedQty);
+                      const bPrice = lineBasePrice(item);
+                      const discPct = lineDiscPercent(item);
+                      const discAmt = lineDiscAmount(item);
+                      const netTotal = lineNetTotal(item);
                       return (
                         <tr key={item.id} className="hover:bg-slate-50">
                           <td className="px-4 py-3">
@@ -543,7 +631,18 @@ export function AdminOrders() {
                             {item.unit_name}
                           </td>
                           <td className="px-4 py-3 text-right text-slate-700">
-                            {formatINR(item.unit_price)}
+                            {formatINR(bPrice)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-500 hidden lg:table-cell">
+                            {discPct > 0 ? `${discPct}%` : '—'}
+                            {discAmt > 0 && (
+                              <span className="block text-xs text-slate-400">
+                                −{formatINR(discAmt)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700">
+                            {formatINR(lineEffPrice(item))}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
                             {item.requested_quantity}
@@ -566,7 +665,7 @@ export function AdminOrders() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
-                            {formatINR(lineTotal)}
+                            {formatINR(netTotal)}
                           </td>
                         </tr>
                       );
@@ -576,29 +675,74 @@ export function AdminOrders() {
               </div>
             </Card>
 
-            {/* Totals */}
-            <div className="flex flex-col sm:flex-row gap-4 sm:items-center sm:justify-end">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="text-slate-500">Requested Total:</span>
-                <span className="font-semibold text-slate-700">
-                  {formatINR(requestedTotal)}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-base border-l border-slate-200 sm:pl-6 pl-0">
-                <span className="text-slate-600 font-medium">
-                  Reviewed Total:
-                </span>
-                <span
-                  className={`font-bold ${
-                    reviewedTotal !== requestedTotal
-                      ? 'text-blue-700'
-                      : 'text-slate-900'
-                  }`}
-                >
-                  {formatINR(reviewedTotal)}
-                </span>
-              </div>
-            </div>
+            {/* Bill breakdown */}
+            <Card>
+              <CardBody className="space-y-2">
+                {/* Order-level discount input (editable during review) */}
+                {isPendingReview ? (
+                  <div className="flex items-center justify-between gap-4 pb-3 border-b border-slate-100">
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700">
+                        Order-Level Discount %
+                      </label>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Applied after product-level discounts.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={orderDiscountStr}
+                        onChange={(e) =>
+                          handleOrderDiscountChange(e.target.value)
+                        }
+                        className="w-24 rounded border border-slate-300 px-2 py-1.5 text-sm text-right text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-slate-500">%</span>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Line items */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Gross Total (before product discounts)</span>
+                  <span className="font-medium text-slate-700">{formatINR(grossTotal)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Total Product-Level Discount</span>
+                  <span className="font-medium text-slate-600">−{formatINR(totalProductDisc)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm border-t border-slate-100 pt-2">
+                  <span className="text-slate-600 font-medium">Subtotal (after product discounts)</span>
+                  <span className="font-semibold text-slate-800">{formatINR(subtotalAfterProductDisc)}</span>
+                </div>
+
+                {/* Order-level discount */}
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">
+                    Order Discount ({orderDiscountPercent}%)
+                  </span>
+                  <span className="font-medium text-slate-600">−{formatINR(orderDiscountAmount)}</span>
+                </div>
+
+                {/* Net payable */}
+                <div className="flex items-center justify-between text-base border-t border-slate-200 pt-2">
+                  <span className="font-bold text-slate-900">Net Payable</span>
+                  <span className="font-bold text-blue-700">{formatINR(netPayable)}</span>
+                </div>
+
+                {/* Saved order discount indicator (non-review) */}
+                {!isPendingReview && orderDiscountPercent > 0 && (
+                  <p className="text-xs text-slate-400 pt-1">
+                    Order-level discount of {orderDiscountPercent}% was applied
+                    during review.
+                  </p>
+                )}
+              </CardBody>
+            </Card>
 
             {/* Review save bar (only for PENDING_REVIEW) */}
             {isPendingReview && (
@@ -670,14 +814,14 @@ export function AdminOrders() {
                         variant="secondary"
                         onClick={handleConfirmOrder}
                         loading={confirming}
-                        disabled={hasQtyChanges() || confirming || confirmSuccess}
+                        disabled={hasUnsavedChanges() || confirming || confirmSuccess}
                       >
                         <Lock className="h-4 w-4" />
                         Confirm Order
                       </Button>
-                      {hasQtyChanges() && (
+                      {hasUnsavedChanges() && (
                         <span className="text-xs text-amber-600">
-                          Save your quantity changes before confirming.
+                          Save your changes before confirming.
                         </span>
                       )}
                     </div>
@@ -687,7 +831,7 @@ export function AdminOrders() {
                     <Button
                       onClick={handleSaveReview}
                       loading={saving}
-                      disabled={!hasQtyChanges() && !saveSuccess}
+                      disabled={!hasUnsavedChanges() && !saveSuccess}
                     >
                       <Save className="h-4 w-4" />
                       Save Reviewed Quantities
@@ -696,7 +840,7 @@ export function AdminOrders() {
                       <X className="h-4 w-4" />
                       Close
                     </Button>
-                    {hasQtyChanges() && !saveSuccess && (
+                    {hasUnsavedChanges() && !saveSuccess && (
                       <span className="text-xs text-amber-600 ml-auto">
                         Unsaved changes
                       </span>
