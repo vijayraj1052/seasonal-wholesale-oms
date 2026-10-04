@@ -363,7 +363,8 @@ export function CustomerOrders() {
                   </div>
                   <ChevronRight className="h-5 w-5 text-slate-300 shrink-0" />
                 </CardBody>
-              </Card>
+                </Card>
+              </div>
             );
           })}
         </div>
