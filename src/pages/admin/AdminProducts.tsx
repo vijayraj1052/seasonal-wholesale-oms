@@ -125,6 +125,60 @@ export function AdminProducts() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Image upload state
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImageError(null);
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setImageError('Only JPEG, PNG, and WebP images are allowed.');
+      e.target.value = '';
+      return;
+    }
+
+    const maxSize = 2 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setImageError('Image must be 2 MB or smaller.');
+      e.target.value = '';
+      return;
+    }
+
+    setImageUploading(true);
+
+    const fileExt = file.name.split('.').pop()?.toLowerCase() ?? 'jpg';
+    const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('product-images')
+      .upload(fileName, file, { contentType: file.type });
+
+    if (uploadError) {
+      setImageError(uploadError.message);
+      setImageUploading(false);
+      e.target.value = '';
+      return;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from('product-images')
+      .getPublicUrl(fileName);
+
+    setProductForm((f) => ({ ...f, image_url: urlData.publicUrl }));
+    setImageUploading(false);
+    e.target.value = '';
+  };
+
+  const handleRemoveImage = () => {
+    setProductForm((f) => ({ ...f, image_url: '' }));
+    setImageError(null);
+  };
+
   const handleDeleteProduct = async (row: ProductRow) => {
     setDeleteError(null);
     const productId = row.product.id;
@@ -799,29 +853,66 @@ export function AdminProducts() {
                 />
               </div>
               <div className="mt-4">
-                <Input
-                  label="Image URL"
-                  value={productForm.image_url}
-                  onChange={(e) =>
-                    setProductForm((f) => ({ ...f, image_url: e.target.value }))
-                  }
-                  placeholder="https://example.com/product-image.jpg"
-                />
-                {productForm.image_url && (
-                  <div className="mt-2 flex items-center gap-2">
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Product Image
+                </label>
+                {productForm.image_url ? (
+                  <div className="flex items-center gap-3">
                     <img
                       src={productForm.image_url}
-                      alt="Preview"
-                      className="h-16 w-16 rounded-lg object-cover border border-slate-200"
+                      alt="Product preview"
+                      className="h-20 w-20 rounded-lg object-cover border border-slate-200"
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
                       }}
                     />
-                    <span className="text-xs text-slate-400">
-                      <ImageIcon className="h-3 w-3 inline mr-1" />
-                      Image preview
-                    </span>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs text-slate-400">
+                        <ImageIcon className="h-3 w-3 inline mr-1" />
+                        Image saved
+                      </span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={handleRemoveImage}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                        Remove
+                      </Button>
+                    </div>
                   </div>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-lg border-2 border-dashed border-slate-300 bg-slate-50">
+                      {imageUploading ? (
+                        <Spinner size="sm" />
+                      ) : (
+                        <ImageIcon className="h-6 w-6 text-slate-300" />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="cursor-pointer">
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-slate-400 transition-colors">
+                          <ImageIcon className="h-4 w-4" />
+                          {imageUploading ? 'Uploading…' : 'Choose Image'}
+                        </span>
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handleImageUpload}
+                          disabled={imageUploading}
+                          className="hidden"
+                        />
+                      </label>
+                      <span className="text-xs text-slate-400">
+                        JPEG, PNG, or WebP · max 2 MB
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {imageError && (
+                  <p className="mt-2 text-sm text-red-600">{imageError}</p>
                 )}
               </div>
             </div>
@@ -1314,6 +1405,23 @@ export function AdminProducts() {
                     {/* Product row */}
                     <CardBody className="space-y-3">
                       <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="shrink-0">
+                          {row.product.image_url ? (
+                            <img
+                              src={row.product.image_url}
+                              alt={row.product.name}
+                              className="h-12 w-12 rounded-lg object-cover border border-slate-200"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+                              <ImageIcon className="h-5 w-5 text-slate-300" />
+                            </div>
+                          )}
+                          </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <button
@@ -1368,6 +1476,7 @@ export function AdminProducts() {
                               {row.product.variety}
                             </p>
                           )}
+                        </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right hidden sm:block">

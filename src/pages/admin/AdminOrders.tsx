@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   X,
   Lock,
+  IndianRupee,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { formatINR } from '@/lib/format';
@@ -65,6 +66,11 @@ export function AdminOrders() {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmSuccess, setConfirmSuccess] = useState(false);
 
+  // Mark as Paid state
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [paidError, setPaidError] = useState<string | null>(null);
+  const [paidSuccess, setPaidSuccess] = useState(false);
+
   const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -93,6 +99,8 @@ export function AdminOrders() {
     setSaveSuccess(false);
     setConfirmError(null);
     setConfirmSuccess(false);
+    setPaidError(null);
+    setPaidSuccess(false);
     setItems([]);
     setConfirmedQtys({});
 
@@ -168,9 +176,49 @@ export function AdminOrders() {
     setSaveSuccess(false);
     setConfirmError(null);
     setConfirmSuccess(false);
+    setPaidError(null);
+    setPaidSuccess(false);
   };
 
   const isPendingReview = selectedOrder?.status === 'PENDING_REVIEW';
+
+  const canMarkPaid =
+    selectedOrder?.status === 'CONFIRMED' ||
+    selectedOrder?.status === 'PAYMENT_PENDING';
+
+  const handleMarkPaid = async () => {
+    if (!selectedOrder) return;
+    setPaidError(null);
+    setPaidSuccess(false);
+    setMarkingPaid(true);
+
+    const { error: updateError } = await supabase
+      .from('orders')
+      .update({
+        status: 'PAID',
+        payment_marked_at: new Date().toISOString(),
+      })
+      .eq('id', selectedOrder.id);
+
+    if (updateError) {
+      setPaidError(updateError.message);
+      setMarkingPaid(false);
+      return;
+    }
+
+    await loadOrders();
+    const updated = ordersRef.current.find(
+      (o) => o.id === selectedOrder.id
+    );
+    if (updated) {
+      setSelectedOrder({ ...updated, status: 'PAID', payment_marked_at: new Date().toISOString() });
+    } else {
+      setSelectedOrder({ ...selectedOrder, status: 'PAID', payment_marked_at: new Date().toISOString() });
+    }
+
+    setPaidSuccess(true);
+    setMarkingPaid(false);
+  };
 
   // Calculate totals
   const requestedTotal = items.reduce(
@@ -658,8 +706,63 @@ export function AdminOrders() {
               </Card>
             )}
 
+            {/* Mark as Paid section */}
+            {canMarkPaid && (
+              <Card>
+                <CardBody className="space-y-3">
+                  <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
+                    <IndianRupee className="h-4 w-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-medium">Mark as Paid</p>
+                      <p className="text-xs mt-0.5">
+                        Record that physical payment has been received for this
+                        order. This updates the payment status only — it does
+                        not allocate or deduct inventory.
+                      </p>
+                    </div>
+                  </div>
+
+                  {paidError && (
+                    <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      {paidError}
+                    </div>
+                  )}
+
+                  {paidSuccess && (
+                    <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4 shrink-0" />
+                      Order marked as Paid. Payment status updated.
+                    </div>
+                  )}
+
+                  <Button
+                    variant="primary"
+                    onClick={handleMarkPaid}
+                    loading={markingPaid}
+                    disabled={markingPaid || paidSuccess}
+                  >
+                    <IndianRupee className="h-4 w-4" />
+                    Mark as Paid
+                  </Button>
+                </CardBody>
+              </Card>
+            )}
+
+            {/* Payment confirmed indicator */}
+            {selectedOrder.status === 'PAID' && selectedOrder.payment_marked_at && (
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                Payment received on{' '}
+                {new Date(selectedOrder.payment_marked_at).toLocaleDateString(
+                  undefined,
+                  { year: 'numeric', month: 'short', day: 'numeric' }
+                )}
+              </div>
+            )}
+
             {/* Non-pending info note */}
-            {!isPendingReview && (
+            {!isPendingReview && selectedOrder.status !== 'PAID' && (
               <div className="flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-500">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 This order is no longer in review. Confirmed quantities are

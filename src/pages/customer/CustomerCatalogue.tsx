@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Search, ShoppingCart, Plus, Minus, Check } from 'lucide-react';
+import { Package, Search, ShoppingCart, Plus, Minus, Check, ImageIcon } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -326,6 +326,23 @@ export function CustomerCatalogue() {
                 <CardBody className="space-y-3">
                   {/* Top row: identity + status */}
                   <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="shrink-0">
+                        {row.product.image_url ? (
+                          <img
+                            src={row.product.image_url}
+                            alt={row.product.name}
+                            className="h-14 w-14 rounded-lg object-cover border border-slate-200"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
+                            <ImageIcon className="h-5 w-5 text-slate-300" />
+                          </div>
+                        )}
+                      </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-slate-400">
@@ -358,6 +375,7 @@ export function CustomerCatalogue() {
                           {row.product.description}
                         </p>
                       )}
+                    </div>
                     </div>
                     <div className="shrink-0 text-right">
                       {orderable ? (
