@@ -6,13 +6,17 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
-import type { Product, Brand, Inventory } from '@/types/database';
+import { formatINR } from '@/lib/format';
+import type { Product, Brand, Inventory, ProductUnit } from '@/types/database';
+
 
 interface InventoryRow {
   product: Product;
   brand: Brand;
   inventory: Inventory | null;
+  units: ProductUnit[];
 }
+
 
 export function AdminInventory() {
   const [rows, setRows] = useState<InventoryRow[]>([]);
@@ -42,16 +46,40 @@ export function AdminInventory() {
       return;
     }
 
+
     const productIds = (data ?? []).map((p) => p.id);
     const invMap = new Map<string, Inventory>();
+    const unitsMap = new Map<string, ProductUnit[]>();
+
     if (productIds.length > 0) {
-      const { data: inv } = await supabase
-        .from('inventory')
-        .select('*')
-        .in('product_id', productIds);
+      const [{ data: inv }, { data: unitData, error: unitError }] =
+        await Promise.all([
+          supabase
+            .from('inventory')
+            .select('*')
+            .in('product_id', productIds),
+          supabase
+            .from('product_units')
+            .select('*')
+            .in('product_id', productIds)
+            .order('sort_order', { ascending: true }),
+        ]);
+
+      if (unitError) {
+        setError(unitError.message);
+        setLoading(false);
+        return;
+      }
+
       (inv ?? []).forEach((i) =>
         invMap.set(i.product_id, i as Inventory)
       );
+
+      (unitData ?? []).forEach((unit) => {
+        const existing = unitsMap.get(unit.product_id) ?? [];
+        existing.push(unit as ProductUnit);
+        unitsMap.set(unit.product_id, existing);
+      });
     }
 
     setRows(
@@ -59,8 +87,10 @@ export function AdminInventory() {
         product: p as Product,
         brand: (p as { brand: Brand }).brand,
         inventory: invMap.get(p.id) ?? null,
+        units: unitsMap.get(p.id) ?? [],
       }))
     );
+
     setLoading(false);
   }, []);
 
@@ -211,6 +241,9 @@ export function AdminInventory() {
                   <th className="px-4 py-3 text-right font-semibold text-slate-700">
                     Net Available
                   </th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">
+                    Base Price (MRP)
+                  </th>
                   <th className="px-4 py-3 text-center font-semibold text-slate-700">
                     Status
                   </th>
@@ -241,9 +274,10 @@ export function AdminInventory() {
                         {row.brand.name}
                       </td>
 
-                      {isEditing ? (
+{isEditing ? (
                         <>
-                          <td className="px-4 py-3 text-right">
+
+<td className="px-4 py-3 text-right">
                             <input
                               type="number"
                               min="0"
@@ -270,10 +304,26 @@ export function AdminInventory() {
                               className="w-20 rounded border border-slate-300 px-2 py-1 text-sm text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
                             />
                           </td>
-                          <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                          <td className="px-4 py-3 text-right font-medium text-slate-900">
                             {(parseInt(editPhysical, 10) || 0) -
                               (parseInt(editAllocated, 10) || 0) -
                               (parseInt(editReserved, 10) || 0)}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">
+                            {row.units.length > 0 ? (
+                              <div className="space-y-1">
+                                {row.units.map((unit) => (
+                                  <div key={unit.id}>
+                                    <span className="text-xs text-slate-500">
+                                      {unit.unit_label}:
+                                    </span>{' '}
+                                    {formatINR(unit.base_price)}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                           <td className="px-4 py-3 text-center" />
                           <td className="px-4 py-3">
@@ -309,6 +359,22 @@ export function AdminInventory() {
                           </td>
                           <td className="px-4 py-3 text-right font-medium text-slate-900">
                             {net ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-700 whitespace-nowrap">
+                            {row.units.length > 0 ? (
+                              <div className="space-y-1">
+                                {row.units.map((unit) => (
+                                  <div key={unit.id}>
+                                    <span className="text-xs text-slate-500">
+                                      {unit.unit_label}:
+                                    </span>{' '}
+                                    {formatINR(unit.base_price)}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              '—'
+                            )}
                           </td>
                           <td className="px-4 py-3 text-center">
                             {isOutOfStock ? (
