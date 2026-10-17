@@ -125,9 +125,21 @@ export function AdminProducts() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Image upload state
+  // Image upload and preview state
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<{ url: string; alt: string } | null>(null);
+
+  useEffect(() => {
+    if (!imagePreview) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setImagePreview(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [imagePreview]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -858,14 +870,27 @@ export function AdminProducts() {
                 </label>
                 {productForm.image_url ? (
                   <div className="flex items-center gap-3">
-                    <img
-                      src={productForm.image_url}
-                      alt="Product preview"
-                      className="h-20 w-20 rounded-lg object-cover border border-slate-200"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
-                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setImagePreview({
+                          url: productForm.image_url,
+                          alt: productForm.name.trim() || 'Product image',
+                        })
+                      }
+                      className="rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      aria-label="Enlarge product image"
+                      title="Click to enlarge"
+                    >
+                      <img
+                        src={productForm.image_url}
+                        alt="Product preview"
+                        className="h-20 w-20 rounded-lg object-cover border border-slate-200 cursor-zoom-in"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    </button>
                     <div className="flex flex-col gap-2">
                       <span className="text-xs text-slate-400">
                         <ImageIcon className="h-3 w-3 inline mr-1" />
@@ -1408,14 +1433,27 @@ export function AdminProducts() {
                         <div className="flex items-start gap-3 min-w-0 flex-1">
                           <div className="shrink-0">
                           {row.product.image_url ? (
-                            <img
-                              src={row.product.image_url}
-                              alt={row.product.name}
-                              className="h-12 w-12 rounded-lg object-cover border border-slate-200"
-                              onError={(e) => {
-                                (e.target as HTMLImageElement).style.display = 'none';
-                              }}
-                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setImagePreview({
+                                  url: row.product.image_url!,
+                                  alt: row.product.name,
+                                })
+                              }
+                              className="rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              aria-label={`Enlarge image of ${row.product.name}`}
+                              title="Click to enlarge"
+                            >
+                              <img
+                                src={row.product.image_url}
+                                alt={row.product.name}
+                                className="h-12 w-12 rounded-lg object-cover border border-slate-200 cursor-zoom-in"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).style.display = 'none';
+                                }}
+                              />
+                            </button>
                           ) : (
                             <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
                               <ImageIcon className="h-5 w-5 text-slate-300" />
@@ -1613,6 +1651,40 @@ export function AdminProducts() {
             </div>
           )}
         </>
+      )}
+
+      {/* Full-size product image preview */}
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 sm:p-8"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Image preview: ${imagePreview.alt}`}
+          onClick={() => setImagePreview(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setImagePreview(null)}
+            className="absolute right-4 top-4 z-[101] flex h-11 w-11 items-center justify-center rounded-full bg-white/95 text-slate-800 shadow-lg transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close image preview"
+            title="Close (Esc)"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <div
+            className="flex max-h-full max-w-full flex-col items-center gap-3"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              src={imagePreview.url}
+              alt={imagePreview.alt}
+              className="max-h-[85vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+            />
+            <p className="max-w-full text-center text-sm font-medium text-white">
+              {imagePreview.alt}
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );

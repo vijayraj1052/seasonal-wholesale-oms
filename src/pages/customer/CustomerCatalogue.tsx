@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, Search, ShoppingCart, Plus, Minus, Check, ImageIcon } from 'lucide-react';
+import { Package, Search, ShoppingCart, Plus, Minus, Check, ImageIcon, X } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -41,6 +41,18 @@ export function CustomerCatalogue() {
   const [selectedUnit, setSelectedUnit] = useState<Record<string, string>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [addedFlash, setAddedFlash] = useState<Record<string, boolean>>({});
+  const [previewImage, setPreviewImage] = useState<{ url: string; name: string } | null>(null);
+
+  useEffect(() => {
+    if (!previewImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewImage]);
 
   useEffect(() => {
     async function load() {
@@ -329,14 +341,27 @@ export function CustomerCatalogue() {
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div className="shrink-0">
                         {row.product.image_url ? (
-                          <img
-                            src={row.product.image_url}
-                            alt={row.product.name}
-                            className="h-14 w-14 rounded-lg object-cover border border-slate-200"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({
+                                url: row.product.image_url as string,
+                                name: row.product.name,
+                              })
+                            }
+                            className="block rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            aria-label={`Enlarge image of ${row.product.name}`}
+                            title="Click to enlarge image"
+                          >
+                            <img
+                              src={row.product.image_url}
+                              alt={row.product.name}
+                              className="h-14 w-14 rounded-lg object-cover border border-slate-200 cursor-zoom-in"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          </button>
                         ) : (
                           <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-slate-200 bg-slate-50">
                             <ImageIcon className="h-5 w-5 text-slate-300" />
@@ -541,6 +566,36 @@ export function CustomerCatalogue() {
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setPreviewImage(null)}
+          role="presentation"
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewImage(null)}
+            className="absolute right-4 top-4 z-[101] flex h-11 w-11 items-center justify-center rounded-full bg-white text-slate-900 shadow-lg transition hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close image preview"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <div
+            className="flex max-h-full max-w-full flex-col items-center gap-3"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <img
+              src={previewImage.url}
+              alt={previewImage.name}
+              className="max-h-[82vh] max-w-[92vw] rounded-lg object-contain shadow-2xl"
+            />
+            <p className="max-w-[92vw] text-center text-sm font-medium text-white">
+              {previewImage.name}
+            </p>
+          </div>
         </div>
       )}
     </div>
