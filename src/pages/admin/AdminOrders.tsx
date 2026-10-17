@@ -9,6 +9,7 @@ import {
   X,
   Lock,
   IndianRupee,
+  Download,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import { formatINR } from '@/lib/format';
@@ -271,6 +272,108 @@ export function AdminOrders() {
     subtotalAfterProductDisc * (orderDiscountPercent / 100);
   const netPayable = subtotalAfterProductDisc - orderDiscountAmount;
 
+  // Create a printable bill using the same totals shown in the admin order detail.
+  const escapeHtml = (value: unknown) =>
+    String(value ?? '—').replace(/[&<>"']/g, (character) => {
+      const entities: Record<string, string> = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      };
+      return entities[character];
+    });
+
+  const downloadBillPdf = () => {
+    if (!selectedOrder || items.length === 0) return;
+
+    const printWindow = window.open('', '_blank', 'width=1000,height=750');
+    if (!printWindow) {
+      window.alert('Please allow pop-ups for this site to print or save the bill as PDF.');
+      return;
+    }
+
+    const itemRows = items.map((item) => {
+      const quantity = getDisplayQty(item);
+      return `
+        <tr>
+          <td>${escapeHtml(item.product_name_snapshot)}${item.variety_snapshot ? `<br><small>${escapeHtml(item.variety_snapshot)}</small>` : ''}${item.product_code ? `<br><small>${escapeHtml(item.product_code)}</small>` : ''}</td>
+          <td>${escapeHtml(item.brand_name_snapshot || '—')}</td>
+          <td>${escapeHtml(item.unit_name)}</td>
+          <td class="number">${escapeHtml(formatINR(lineBasePrice(item)))}</td>
+          <td class="number">${lineDiscPercent(item)}%</td>
+          <td class="number">${escapeHtml(formatINR(lineEffPrice(item)))}</td>
+          <td class="number">${quantity}</td>
+          <td class="number">${escapeHtml(formatINR(lineNetTotal(item)))}</td>
+        </tr>`;
+    }).join('');
+
+    const orderDate = new Date(selectedOrder.created_at).toLocaleString('en-IN', {
+      year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    const paymentDueDate = selectedOrder.payment_due_date
+      ? new Date(selectedOrder.payment_due_date).toLocaleDateString('en-IN', {
+          year: 'numeric', month: 'short', day: 'numeric',
+        })
+      : '';
+    const paymentDate = selectedOrder.payment_marked_at
+      ? new Date(selectedOrder.payment_marked_at).toLocaleDateString('en-IN', {
+          year: 'numeric', month: 'short', day: 'numeric',
+        })
+      : '';
+    const isPaid = selectedOrder.status === 'PAID';
+
+    printWindow.document.write(`<!doctype html>
+      <html lang="en"><head><meta charset="utf-8"><title>Bill ${escapeHtml(selectedOrder.order_number)}</title>
+      <style>
+        * { box-sizing: border-box; }
+        body { font-family: Arial, Helvetica, sans-serif; color: #172033; margin: 28px; font-size: 12px; }
+        h1 { margin: 0 0 5px; font-size: 23px; }
+        h2 { margin: 22px 0 9px; font-size: 14px; }
+        .muted { color: #64748b; }
+        .top { display: flex; justify-content: space-between; gap: 20px; border-bottom: 2px solid #1e40af; padding-bottom: 14px; }
+        .status { text-align: right; }
+        .details { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 22px; margin-top: 16px; }
+        .details strong { display: inline-block; min-width: 85px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+        th, td { padding: 8px 6px; border-bottom: 1px solid #dbe2ea; text-align: left; vertical-align: top; }
+        th { background: #f1f5f9; font-size: 10px; }
+        .number { text-align: right; white-space: nowrap; }
+        small { color: #64748b; }
+        .totals { width: 350px; max-width: 100%; margin: 18px 0 0 auto; }
+        .total-row { display: flex; justify-content: space-between; gap: 18px; padding: 6px 0; }
+        .final { border-top: 2px solid #172033; margin-top: 5px; padding-top: 10px; font-size: 16px; font-weight: bold; }
+        .footer { margin-top: 30px; border-top: 1px solid #dbe2ea; padding-top: 10px; color: #64748b; font-size: 10px; }
+        @media print { body { margin: 12mm; } }
+      </style></head><body>
+        <div class="top"><div><h1>FINAL BILL</h1><div class="muted">Order: ${escapeHtml(selectedOrder.order_number)}</div><div class="muted">Date: ${escapeHtml(orderDate)}</div></div>
+        <div class="status"><strong>${escapeHtml(ORDER_STATUS_LABELS[selectedOrder.status as OrderStatus])}</strong>${isPaid && paymentDate ? `<div class="muted">Paid on ${escapeHtml(paymentDate)}</div>` : ''}</div></div>
+        <h2>Customer Details</h2>
+        <div class="details">
+          <div><strong>Name:</strong> ${escapeHtml(selectedOrder.customer_name)}</div>
+          <div><strong>Phone:</strong> ${escapeHtml(selectedOrder.customer_mobile)}</div>
+          <div><strong>Shop:</strong> ${escapeHtml(selectedOrder.customer_shop)}</div>
+          <div><strong>Stall:</strong> ${escapeHtml(selectedOrder.customer_stall_number)}</div>
+          <div><strong>Location:</strong> ${escapeHtml(selectedOrder.customer_stall_location)}</div>
+          ${selectedOrder.customer_licence ? `<div><strong>Licence:</strong> ${escapeHtml(selectedOrder.customer_licence)}</div>` : ''}
+        </div>
+        <h2>Items</h2>
+        <table><thead><tr><th>Product</th><th>Brand</th><th>Unit</th><th class="number">MRP / Base</th><th class="number">Disc %</th><th class="number">Unit Price</th><th class="number">Qty</th><th class="number">Net Total</th></tr></thead><tbody>${itemRows}</tbody></table>
+        <div class="totals">
+          <div class="total-row"><span>Gross Total</span><strong>${escapeHtml(formatINR(grossTotal))}</strong></div>
+          <div class="total-row"><span>Product-Level Discount</span><strong>−${escapeHtml(formatINR(totalProductDisc))}</strong></div>
+          <div class="total-row"><span>Subtotal after product discounts</span><strong>${escapeHtml(formatINR(subtotalAfterProductDisc))}</strong></div>
+          ${orderDiscountPercent > 0 ? `<div class="total-row"><span>Order Discount (${orderDiscountPercent}%)</span><strong>−${escapeHtml(formatINR(orderDiscountAmount))}</strong></div>` : ''}
+          <div class="total-row final"><span>NET PAYABLE</span><span>${escapeHtml(formatINR(netPayable))}</span></div>
+          ${paymentDueDate && !isPaid ? `<div class="total-row"><span>Payment due by</span><strong>${escapeHtml(paymentDueDate)}</strong></div>` : ''}
+        </div>
+        <div class="footer">Generated from Wholesale OMS. Please retain this bill for your records.</div>
+        <script>window.onload = () => { window.focus(); window.print(); };</script>
+      </body></html>`);
+    printWindow.document.close();
+  };
+
   // Legacy totals (kept for backward compat in any logic that references them)
   const requestedTotal = items.reduce(
     (sum, item) => sum + item.unit_price * item.requested_quantity,
@@ -493,6 +596,14 @@ export function AdminOrders() {
           >
             {ORDER_STATUS_LABELS[selectedOrder.status as OrderStatus]}
           </Badge>
+          <Button
+            variant="primary"
+            onClick={downloadBillPdf}
+            disabled={detailLoading || !!detailError || items.length === 0}
+          >
+            <Download className="h-4 w-4" />
+            Download PDF
+          </Button>
         </div>
 
         {/* Customer info */}
