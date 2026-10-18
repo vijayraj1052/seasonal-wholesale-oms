@@ -45,7 +45,6 @@ export function CustomerRegister() {
     if (!form.mobile_number.trim()) e.mobile_number = 'Mobile number is required';
     else if (!/^[0-9+\-\s()]{7,20}$/.test(form.mobile_number.trim()))
       e.mobile_number = 'Enter a valid mobile number';
-    if (!form.shop_name.trim()) e.shop_name = 'Shop/business name is required';
     if (!form.stall_number.trim()) e.stall_number = 'Stall number is required';
     if (!form.stall_location.trim())
       e.stall_location = 'Stall location is required';
@@ -131,8 +130,7 @@ export function CustomerRegister() {
         />
 
         <Input
-          label="Shop / Business Name"
-          required
+          label="Shop / Business Name (Optional)"
           value={form.shop_name}
           onChange={(e) => update('shop_name', e.target.value)}
           error={errors.shop_name}
